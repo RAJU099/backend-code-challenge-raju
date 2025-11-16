@@ -1,5 +1,5 @@
+using CodeChallenge.Api.Logic;
 using CodeChallenge.Api.Models;
-using CodeChallenge.Api.Repositories;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CodeChallenge.Api.Controllers;
@@ -8,30 +8,28 @@ namespace CodeChallenge.Api.Controllers;
 [Route("api/v1/organizations/{organizationId}/messages")]
 public class MessagesController : ControllerBase
 {
-    private readonly IMessageRepository _repository;
+    private readonly IMessageLogic _logic;
     private readonly ILogger<MessagesController> _logger;
 
-    public MessagesController(IMessageRepository repository, ILogger<MessagesController> logger)
+    public MessagesController(IMessageLogic logic, ILogger<MessagesController> logger)
     {
-        _repository = repository;
+        _logic = logic;
         _logger = logger;
     }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Message>>> GetAll(Guid organizationId)
     {
-        var messages = await _repository.GetAllByOrganizationAsync(organizationId);
+        var messages = await _logic.GetAllMessagesAsync(organizationId);
         return Ok(messages);
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<Message>> GetById(Guid organizationId, Guid id)
     {
-        var message = await _repository.GetByIdAsync(organizationId, id);
+        var message = await _logic.GetMessageAsync(organizationId, id);
         if (message is null)
-        {
             return NotFound();
-        }
 
         return Ok(message);
     }
@@ -42,55 +40,46 @@ public class MessagesController : ControllerBase
         if (request is null)
             return BadRequest();
 
-        var message = new Message
-        {
-            OrganizationId = organizationId,
-            Title = request.Title ?? string.Empty,
-            Content = request.Content ?? string.Empty,
-            IsActive = true
-        };
+        var result = await _logic.CreateMessageAsync(organizationId, request);
 
-        var created = await _repository.CreateAsync(message);
-        return CreatedAtAction(nameof(GetById), new { organizationId = organizationId, id = created.Id }, created);
+        return result switch
+        {
+            Created<Message> c => CreatedAtAction(nameof(GetById), new { organizationId, id = c.Value.Id }, c.Value),
+            ValidationError v => BadRequest(v.Errors),
+            Conflict c => Conflict(new { message = c.Message }),
+            _ => StatusCode(500)
+        };
     }
 
     [HttpPut("{id}")]
     public async Task<ActionResult> Update(Guid organizationId, Guid id, [FromBody] UpdateMessageRequest request)
     {
         if (request is null)
-        {
             return BadRequest();
-        }
 
-        var existing = await _repository.GetByIdAsync(organizationId, id);
-        if (existing is null)
+        var result = await _logic.UpdateMessageAsync(organizationId, id, request);
+
+        return result switch
         {
-            return NotFound();
-        }
-
-        // Apply updates; UpdatedAt will be set by repository
-        existing.Title = request.Title ?? existing.Title;
-        existing.Content = request.Content ?? existing.Content;
-        existing.IsActive = request.IsActive;
-
-        var updated = await _repository.UpdateAsync(existing);
-        if (updated is null)
-        {
-            return NotFound();
-        }
-
-        return NoContent();
+            Updated => NoContent(),
+            NotFound n => NotFound(new { message = n.Message }),
+            ValidationError v => BadRequest(v.Errors),
+            Conflict c => Conflict(new { message = c.Message }),
+            _ => StatusCode(500)
+        };
     }
 
     [HttpDelete("{id}")]
     public async Task<ActionResult> Delete(Guid organizationId, Guid id)
     {
-        var deleted = await _repository.DeleteAsync(organizationId, id);
-        if (!deleted)
-        {
-            return NotFound();
-        }
+        var result = await _logic.DeleteMessageAsync(organizationId, id);
 
-        return NoContent();
+        return result switch
+        {
+            Deleted => NoContent(),
+            NotFound n => NotFound(new { message = n.Message }),
+            ValidationError v => BadRequest(v.Errors),
+            _ => StatusCode(500)
+        };
     }
 }
