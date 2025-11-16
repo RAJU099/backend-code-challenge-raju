@@ -1,4 +1,3 @@
-Logic\MessageLogic.cs
 using CodeChallenge.Api.Models;
 using CodeChallenge.Api.Repositories;
 
